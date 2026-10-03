@@ -1,0 +1,32 @@
+fastapi==0.115.5
+uvicorn[standard]==0.32.1
+pydantic==2.10.3
+pydantic-settings==2.6.1
+
+# Google Gemini (new SDK - LLM + Embedding)
+google-genai>=2.0.0
+
+# PostgreSQL + pgvector
+asyncpg>=0.30.0
+
+# Document loading
+pypdf>=5.1.0
+python-docx>=1.1.2
+
+# Text splitting
+langchain-text-splitters>=0.3.2
+
+# HTTP client
+httpx>=0.28.0
+
+# Utilities
+python-dotenv>=1.0.1
+loguru>=0.7.3
+
+# Dev / Testing
+pytest>=8.3.4
+pytest-asyncio>=0.24.0
+pytest-mock>=3.14.0
+anyio>=4.0.0
+black>=24.10.0
+ruff>=0.8.3
