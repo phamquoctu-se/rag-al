@@ -38,6 +38,10 @@ class Settings(BaseSettings):
     min_chunk_size: int = 350
     max_chunk_size: int = 1200
 
+    # LLM token budget
+    max_context_tokens: int = 1_048_576   # model context window (gemini-3.6-flash)
+    max_output_tokens: int = 8192         # max tokens reserved for the response
+
     # Logging
     log_level: str = "DEBUG"
 

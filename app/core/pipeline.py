@@ -59,26 +59,28 @@ async def run_rag_pipeline(
 
         # ── Step 3: Threshold check ──────────────────────────────────────────
         if not chunks:
+            answer, model_version = await generate_answer(question, [])
             elapsed = int((time.monotonic() - start_ms) * 1000)
             logger.info(f"RAG result=no_source ({elapsed}ms)")
             return ChatResponse(
-                answer=None,
+                answer=answer,
                 query_status="no_source",
                 retrieved_chunks=[],
                 top_similarity=None,
-                model_version=None,
+                model_version=model_version,
                 processing_time_ms=elapsed,
             )
 
         if top_similarity < threshold:
+            answer, model_version = await generate_answer(question, chunks)
             elapsed = int((time.monotonic() - start_ms) * 1000)
             logger.info(f"RAG result=low_match top_sim={top_similarity:.4f} ({elapsed}ms)")
             return ChatResponse(
-                answer=None,
+                answer=answer,
                 query_status="low_match",
                 retrieved_chunks=_to_schema_chunks(chunks),
                 top_similarity=top_similarity,
-                model_version=None,
+                model_version=model_version,
                 processing_time_ms=elapsed,
             )
 
