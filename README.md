@@ -113,6 +113,8 @@ DATABASE_URL=postgresql://postgres:password@localhost:5432/smartshrimp
 | `MAX_CHUNK_SIZE` | `1200` | Kích thước tối đa của chunk. |
 | `CHUNK_OVERLAP` | `150` | Số ký tự tối đa của các câu hoàn chỉnh được gối sang chunk tiếp theo. |
 | `CHUNK_SIZE` | `800` | Chỉ dùng khi `CHUNKING_STRATEGY=recursive`. |
+| `MAX_CONTEXT_TOKENS` | `1048576` | Giới hạn context window của model (tokens). Prompt sẽ được cắt chunk nếu vượt. |
+| `MAX_OUTPUT_TOKENS` | `8192` | Số token tối đa cho câu trả lời. Tăng nếu câu trả lời bị cụt. |
 | `LOG_LEVEL` | `DEBUG` | Mức log của service. |
 
 ## 4. Khởi tạo vector store
@@ -256,8 +258,8 @@ Response mẫu:
 | Trạng thái | Ý nghĩa |
 |---|---|
 | `answered` | Có chunk đạt ngưỡng và Gemini đã sinh câu trả lời. |
-| `low_match` | Có kết quả retrieval nhưng similarity cao nhất thấp hơn ngưỡng. |
-| `no_source` | Vector store không trả về chunk nào. |
+| `low_match` | Similarity thấp hơn ngưỡng; vẫn sinh câu trả lời, backend kèm cảnh báo cần kiểm chứng. |
+| `no_source` | Không có chunk; vẫn sinh câu trả lời tổng quát, backend cảnh báo chưa có nguồn tham chiếu. |
 | `error` | Lỗi embedding, database, Gemini hoặc lỗi kỹ thuật khác. |
 
 ### Mã HTTP đáng chú ý
@@ -358,7 +360,7 @@ PostgreSQL/pgvector + Gemini
 - Embed câu hỏi.
 - Tìm top-K chunk trong `document_chunks`.
 - Kiểm tra similarity threshold.
-- Sinh câu trả lời có căn cứ từ tài liệu.
+- Sinh câu trả lời dựa trên tài liệu; khi thiếu nguồn, trả lời tổng quát và yêu cầu kiểm chứng.
 - Trả kết quả retrieval và thông tin xử lý.
 
 RAG service không xác thực JWT và không nên được mobile/web gọi trực tiếp.
@@ -466,9 +468,9 @@ Kết quả RAG có thể ánh xạ vào `rag_queries` như sau:
 
 Lưu ý khi tích hợp:
 
-- `smartshrimp_be/prisma/schema.prisma` hiện chưa khai báo các model RAG, dù các bảng
-  đã xuất hiện trong `smartshrimp.sql`. Cần bổ sung Prisma models hoặc dùng truy vấn
-  SQL phù hợp.
+- Nhánh `feat/85-87-rag-conversations-feedback` của backend đã bổ sung Prisma models
+  ánh xạ các bảng RAG hiện có trong `smartshrimp.sql`. Chạy `npx prisma generate`
+  trước khi khởi động backend; không cần thay đổi database.
 - Constraint của `rag_queries` yêu cầu `error_message` khi `query_status='error'`,
   trong khi `ChatResponse` hiện không trả `error_message`. Backend cần tạm lưu một
   thông báo lỗi chuẩn hóa, hoặc contract RAG cần được mở rộng trước khi hoàn thiện
@@ -485,8 +487,8 @@ Backend nên phân biệt hai nhóm lỗi:
 Đọc `query_status`:
 
 - `answered`: lưu và trả câu trả lời.
-- `low_match`: lưu trạng thái; thông báo chưa tìm thấy tài liệu đủ liên quan.
-- `no_source`: lưu trạng thái; thông báo kho kiến thức chưa có nguồn phù hợp.
+- `low_match`: lưu và trả câu trả lời cùng nguồn đã retrieve; cảnh báo độ liên quan thấp.
+- `no_source`: lưu và trả câu trả lời tổng quát; cảnh báo chưa có nguồn tham chiếu.
 - `error`: lưu lỗi chuẩn hóa; trả thông báo tạm thời không thể xử lý.
 
 ### RAG không trả HTTP 200
@@ -500,6 +502,10 @@ Không trả Gemini API key, internal key, stack trace hoặc chi tiết kết n
 cho client.
 
 ## 7. Checklist tích hợp SmartShrimp
+
+Backend API và Flutter đã được triển khai trên nhánh `feat/85-87-rag-conversations-feedback`
+trong từng repository. Xem `smartshrimp_be/docs/rag-api.md` để biết contract, quyền,
+cấu hình và kết quả kiểm thử. Checklist dưới đây là hướng dẫn triển khai môi trường thực.
 
 - [ ] Thêm cấu hình RAG vào `smartshrimp_be/src/config/index.js`.
 - [ ] Thêm service gọi `POST /v1/chat` bằng `axios`.

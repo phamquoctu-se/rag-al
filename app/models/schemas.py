@@ -47,7 +47,7 @@ class ChatResponse(BaseModel):
 
     answer: Optional[str] = Field(
         default=None,
-        description="Câu trả lời từ LLM; None nếu không có nguồn"
+        description="Câu trả lời từ LLM, kể cả no_source/low_match; None khi có lỗi"
     )
     query_status: str = Field(
         ...,

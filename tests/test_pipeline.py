@@ -49,14 +49,17 @@ async def test_low_match_when_similarity_below_threshold():
     with (
         patch("app.core.pipeline.embed_text", new_callable=AsyncMock) as mock_embed,
         patch("app.core.pipeline.retrieve", new_callable=AsyncMock) as mock_retrieve,
+        patch("app.core.pipeline.generate_answer", new_callable=AsyncMock) as mock_gen,
     ):
         mock_embed.return_value = [0.1] * 768
         mock_retrieve.return_value = [make_chunk(0.3)]  # below threshold 0.5
+        mock_gen.return_value = ("Câu trả lời cần kiểm chứng", "test-model")
 
         response = await run_rag_pipeline("Câu hỏi không liên quan lắm")
 
         assert response.query_status == "low_match"
-        assert response.answer is None
+        assert response.answer == "Câu trả lời cần kiểm chứng"
+        mock_gen.assert_awaited_once()
         assert response.top_similarity == 0.3
         assert len(response.retrieved_chunks) == 1
 
@@ -67,14 +70,17 @@ async def test_no_source_when_no_chunks_returned():
     with (
         patch("app.core.pipeline.embed_text", new_callable=AsyncMock) as mock_embed,
         patch("app.core.pipeline.retrieve", new_callable=AsyncMock) as mock_retrieve,
+        patch("app.core.pipeline.generate_answer", new_callable=AsyncMock) as mock_gen,
     ):
         mock_embed.return_value = [0.1] * 768
         mock_retrieve.return_value = []
+        mock_gen.return_value = ("Câu trả lời tổng quát chưa có nguồn", "test-model")
 
         response = await run_rag_pipeline("Câu hỏi bất kỳ")
 
         assert response.query_status == "no_source"
-        assert response.answer is None
+        assert response.answer == "Câu trả lời tổng quát chưa có nguồn"
+        mock_gen.assert_awaited_once_with("Câu hỏi bất kỳ", [])
         assert response.top_similarity is None
         assert response.retrieved_chunks == []
 
