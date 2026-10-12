@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 from app.db.session import get_connection
+from app.utils.errors import DocumentConflictError
 from app.utils.logger import logger
 
 
@@ -20,6 +21,7 @@ async def search_similar_chunks(
     query_embedding: list[float],
     top_k: int = 5,
     source_file_filter: Optional[str] = None,
+    eligible_documents: Optional[list[dict]] = None,
 ) -> list[DocumentChunk]:
     """
     Query pgvector for the top-K most similar chunks to query_embedding.
@@ -40,7 +42,7 @@ async def search_similar_chunks(
         sql = """
             SELECT
                 id::text,
-                source_file,
+                COALESCE(metadata->>'original_filename', source_file) AS source_file,
                 chunk_index,
                 content,
                 metadata,
@@ -55,7 +57,7 @@ async def search_similar_chunks(
         sql = """
             SELECT
                 id::text,
-                source_file,
+                COALESCE(metadata->>'original_filename', source_file) AS source_file,
                 chunk_index,
                 content,
                 metadata,
@@ -65,6 +67,16 @@ async def search_similar_chunks(
             LIMIT $2
         """
         params = [embedding_str, top_k]
+
+    # Missing eligibility preserves legacy CLI sources but never exposes managed documents.
+    if eligible_documents is None:
+        condition = "NOT (metadata ? 'document_id')"
+    else:
+        params.append(json.dumps(eligible_documents))
+        condition = f"""EXISTS (SELECT 1 FROM jsonb_array_elements(${len(params)}::jsonb) AS allowed
+            WHERE metadata->>'document_id' = allowed->>'document_id'
+              AND metadata->>'attempt' = allowed->>'attempt')"""
+    sql = sql.replace("ORDER BY embedding", f"{'AND' if source_file_filter else 'WHERE'} {condition}\n ORDER BY embedding")
 
     try:
         async with get_connection() as conn:
@@ -129,4 +141,41 @@ async def insert_chunks(chunks: list[dict]) -> int:
         )
 
     logger.info(f"Inserted/updated {len(chunks)} chunks")
+    return len(chunks)
+
+
+async def insert_new_document(chunks: list[dict]) -> int:
+    """Store every chunk or none; serialize uploads sharing the same source name."""
+    if not chunks:
+        return 0
+    source_file = chunks[0]["source_file"]
+    if any(chunk["source_file"] != source_file for chunk in chunks):
+        raise ValueError("All chunks must belong to one document")
+    async with get_connection() as conn:
+        async with conn.transaction():
+            # The existing schema keys documents by source_file. This lock prevents
+            # concurrent uploads from both passing the existence check.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", source_file)
+            exists = await conn.fetchval(
+                "SELECT EXISTS(SELECT 1 FROM document_chunks WHERE source_file = $1)",
+                source_file,
+            )
+            if exists:
+                raise DocumentConflictError("Document already exists")
+            await conn.executemany(
+                """
+                INSERT INTO document_chunks (source_file, chunk_index, content, embedding, metadata)
+                VALUES ($1, $2, $3, $4::vector, $5::jsonb)
+                """,
+                [
+                    (
+                        chunk["source_file"],
+                        chunk["chunk_index"],
+                        chunk["content"],
+                        f"[{','.join(str(v) for v in chunk['embedding'])}]",
+                        json.dumps(chunk.get("metadata", {})),
+                    )
+                    for chunk in chunks
+                ],
+            )
     return len(chunks)

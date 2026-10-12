@@ -1,5 +1,13 @@
 # SmartShrimp RAG Service
 
+## API nạp tài liệu từ admin
+
+Backend cung cấp CRUD `/api/v1/admin/rag/documents` (Bearer token ADMIN ACTIVE). Upload multipart cần `file` và `title`, tối đa 10 MiB, PDF/DOCX/MD/TXT; bản gốc lưu Cloudinary authenticated raw. Upload trả 202 và worker bền trong PostgreSQL xử lý nền. Xem [contract đầy đủ](../smartshrimp_be/docs/admin-rag-documents-api.md).
+
+RAG cung cấp endpoint nội bộ `POST /v1/documents/{uuid}/ingest` với query `filename`, `title`, `attempt`, header `X-Internal-Key` và body binary `application/octet-stream`; xóa vectors qua `DELETE /v1/documents/{uuid}/vectors`. Dùng chung loader/chunking/embedding với CLI, thay vectors trong transaction. Attempt, advisory lock và tombstone ngăn trùng hoặc index đến muộn sau xóa. File tạm được dọn sau xử lý. Endpoint legacy `POST /v1/documents` vẫn giữ cho nguồn không được quản lý.
+
+Chạy `python scripts/migrate_documents.py` để áp dụng `002_managed_document_indexes.sql` sau migration 001. Chỉ khi chủ ý reset DEV mới thêm `--reset-legacy`. Backend dùng `RAG_INGESTION_TIMEOUT_MS` (mặc định 300000 ms). Chat gửi danh sách UUID/attempt READY và active, được lọc trước top-K. Thiếu danh sách chỉ truy xuất nguồn legacy; danh sách rỗng không truy xuất tài liệu quản lý. Chạy test bằng `python -m pytest -q`; đặt `RAG_DB_INTEGRATION=1` cho test DB thật có rollback fixture.
+
 Microservice FastAPI cung cấp chức năng hỏi đáp kỹ thuật nuôi tôm bằng
 Retrieval-Augmented Generation (RAG). Service đọc tài liệu chuyên môn, chia tài liệu
 theo ngữ nghĩa, lưu embedding trong PostgreSQL/pgvector và sử dụng Gemini để tạo câu
@@ -10,9 +18,7 @@ README được chia thành hai phần:
 1. [Sử dụng RAG như một service độc lập](#phần-1--sử-dụng-rag-như-một-service-độc-lập)
 2. [Tích hợp RAG với hệ thống SmartShrimp](#phần-2--tích-hợp-với-hệ-thống-smartshrimp)
 
-> **Trạng thái tích hợp:** API của RAG service đã sẵn sàng, nhưng `smartshrimp_be`
-> hiện chưa có route, controller hoặc service gọi sang RAG. Phần 2 mô tả contract và
-> các bước cần triển khai ở backend SmartShrimp.
+> **Trạng thái tích hợp:** Backend đã có tích hợp chat và quản lý tài liệu. Phần 2 giữ mô tả contract nền; luồng quản lý hiện tại theo tài liệu API liên kết ở trên.
 
 ## Tổng quan kiến trúc
 

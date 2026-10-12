@@ -7,21 +7,20 @@ Usage:
     python -m app.ingestion.ingest --path data/documents/ --clear
 """
 
-import asyncio
 import argparse
+import asyncio
 import time
 from pathlib import Path
 
-# Load .env before importing app modules
-from dotenv import load_dotenv
-load_dotenv()
+from starlette.concurrency import run_in_threadpool
 
-from app.utils.logger import logger
-from app.ingestion.loader import load_document, load_directory
-from app.ingestion.chunker import chunk_document
 from app.core.embedder import embed_document_chunk
-from app.db.session import init_db_pool, close_db_pool
-from app.db.vector_store import insert_chunks
+from app.db.session import close_db_pool, init_db_pool
+from app.db.vector_store import insert_chunks, insert_new_document
+from app.ingestion.chunker import chunk_document
+from app.ingestion.loader import RawDocument, load_directory, load_document
+from app.utils.errors import InvalidDocumentError
+from app.utils.logger import logger
 
 
 async def ingest_file(file_path: Path) -> int:
@@ -29,25 +28,55 @@ async def ingest_file(file_path: Path) -> int:
     logger.info(f"Loading: {file_path.name}")
     doc = load_document(file_path)
 
+    return await ingest_document(doc)
+
+
+async def ingest_upload(file_path: Path, *, source_file: str) -> int:
+    """Parse uploads off the event loop and add a new source atomically."""
+    try:
+        doc = await run_in_threadpool(load_document, file_path)
+    except Exception as exc:
+        raise InvalidDocumentError("Cannot read document") from exc
+    doc.source_file = source_file
+    if not doc.content.strip():
+        raise InvalidDocumentError("Document contains no readable text")
+    return await ingest_document(doc, create_only=True)
+
+
+async def ingest_document(doc: RawDocument, *, create_only: bool = False) -> int:
+    """Shared CLI/API chunking and embedding pipeline."""
+    embedded_chunks = await prepare_document_chunks(doc)
+    if create_only and not embedded_chunks:
+        raise InvalidDocumentError("Document contains no readable text")
+    count = await (
+        insert_new_document(embedded_chunks) if create_only else insert_chunks(embedded_chunks)
+    )
+    logger.info(f"  -> {count} chunks stored in pgvector")
+    return count
+
+
+async def prepare_document_chunks(doc: RawDocument) -> list[dict]:
+    """Shared preparation also used by managed, atomic document indexing."""
+
     chunks = await chunk_document(doc)
     logger.info(f"  -> {len(chunks)} chunks created")
 
     embedded_chunks = []
     for chunk in chunks:
         embedding = await embed_document_chunk(chunk.content)
-        embedded_chunks.append({
-            "source_file": chunk.source_file,
-            "chunk_index": chunk.chunk_index,
-            "content": chunk.content,
-            "embedding": embedding,
-            "metadata": chunk.metadata,
-        })
+        embedded_chunks.append(
+            {
+                "source_file": chunk.source_file,
+                "chunk_index": chunk.chunk_index,
+                "content": chunk.content,
+                "embedding": embedding,
+                "metadata": chunk.metadata,
+            }
+        )
         # Small delay to avoid rate limiting
         await asyncio.sleep(0.05)
 
-    count = await insert_chunks(embedded_chunks)
-    logger.info(f"  -> {count} chunks stored in pgvector")
-    return count
+    return embedded_chunks
 
 
 async def main(path: str, clear: bool = False) -> None:
