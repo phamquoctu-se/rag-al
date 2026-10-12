@@ -4,12 +4,12 @@ from typing import Optional
 
 from app.config import settings
 from app.core.embedder import embed_text
-from app.core.retriever import retrieve
 from app.core.generator import generate_answer
+from app.core.retriever import retrieve
 from app.db.vector_store import DocumentChunk
 from app.models.schemas import ChatResponse, RetrievedChunk
-from app.utils.logger import logger
 from app.utils.errors import EmbeddingError, LLMError
+from app.utils.logger import logger
 
 
 @dataclass
@@ -26,6 +26,7 @@ class PipelineResult:
 async def run_rag_pipeline(
     question: str,
     top_k: Optional[int] = None,
+    eligible_documents: Optional[list[dict]] = None,
 ) -> ChatResponse:
     """
     Full RAG pipeline:
@@ -53,7 +54,8 @@ async def run_rag_pipeline(
         query_embedding = await embed_text(question)
 
         # ── Step 2: Retrieve similar chunks ─────────────────────────────────
-        chunks = await retrieve(query_embedding, top_k=k)
+        chunks = await retrieve(query_embedding, top_k=k,
+            **({"eligible_documents": eligible_documents} if eligible_documents is not None else {}))
 
         top_similarity = chunks[0].similarity if chunks else None
 
@@ -110,7 +112,7 @@ async def run_rag_pipeline(
             model_version=None,
             processing_time_ms=elapsed,
         )
-    except Exception as e:
+    except Exception:
         elapsed = int((time.monotonic() - start_ms) * 1000)
         logger.exception(f"Unexpected RAG pipeline error ({elapsed}ms)")
         return ChatResponse(

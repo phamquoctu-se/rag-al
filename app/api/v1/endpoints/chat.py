@@ -33,6 +33,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     response = await run_rag_pipeline(
         question=request.question,
         top_k=request.top_k,
+        **({"eligible_documents": [doc.model_dump(mode="json") for doc in request.eligible_documents]}
+           if request.eligible_documents is not None else {}),
     )
 
     logger.info(
